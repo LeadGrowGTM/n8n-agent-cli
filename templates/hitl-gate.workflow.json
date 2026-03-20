@@ -1,0 +1,129 @@
+{
+  "_meta": {
+    "template": "hitl-gate",
+    "description": "Human-in-the-loop approval gate. Agent calls webhook → Slack notification → human approves/rejects → action executes → result returned synchronously.",
+    "skill": "n8n-hitl-gate",
+    "version": "0.1.0"
+  },
+  "name": "[Tool] HITL Gate - ACTION NAME",
+  "nodes": [
+    {
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hitl-action",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "validate-payload",
+      "name": "Validate Payload",
+      "type": "n8n-nodes-base.code",
+      "position": [480, 300],
+      "parameters": {
+        "jsCode": "// Validate and describe the action for the approval message\nconst { action, target, value } = $json.body;\n\nif (!action || !target) {\n  throw new Error('Missing required fields: action, target');\n}\n\nreturn {\n  action,\n  target,\n  value: value || null,\n  description: `${action}: ${target}${value ? ` ($${value})` : ''}`,\n  requested_at: new Date().toISOString()\n};"
+      }
+    },
+    {
+      "id": "slack-approval",
+      "name": "Slack Approval Request",
+      "type": "n8n-nodes-base.slack",
+      "position": [720, 300],
+      "parameters": {
+        "operation": "message",
+        "channel": "#agent-approvals",
+        "text": ":robot_face: *OpenClaw action requires approval*\n\nAction: {{ $json.description }}\nRequested: {{ $json.requested_at }}\n\n*Click to respond:*\n<YOUR_N8N_URL/webhook/approve-action?execution_id={{ $execution.id }}&decision=approved|✅ Approve>  |  <YOUR_N8N_URL/webhook/approve-action?execution_id={{ $execution.id }}&decision=rejected|❌ Reject>\n\n_This request expires in 24 hours_"
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_CREDENTIAL_ID",
+          "name": "Slack - YOUR WORKSPACE"
+        }
+      }
+    },
+    {
+      "id": "wait-for-approval",
+      "name": "Wait for Approval",
+      "type": "n8n-nodes-base.wait",
+      "position": [960, 300],
+      "parameters": {
+        "resume": "webhook",
+        "options": {
+          "limitWaitTime": true,
+          "limitType": "hours",
+          "limitValue": 24
+        }
+      }
+    },
+    {
+      "id": "check-decision",
+      "name": "Check Decision",
+      "type": "n8n-nodes-base.if",
+      "position": [1200, 300],
+      "parameters": {
+        "conditions": {
+          "string": [{
+            "value1": "={{ $json.query.decision }}",
+            "operation": "equals",
+            "value2": "approved"
+          }]
+        }
+      }
+    },
+    {
+      "id": "execute-action",
+      "name": "Execute Action (customize this)",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1440, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "YOUR_API_ENDPOINT",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": []
+        }
+      }
+    },
+    {
+      "id": "respond-approved",
+      "name": "Respond: Completed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1680, 200],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'completed', message: 'Action approved and executed', result: $json, timestamp: new Date().toISOString() }) }}",
+        "options": { "responseCode": 200 }
+      }
+    },
+    {
+      "id": "respond-rejected",
+      "name": "Respond: Rejected",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1680, 400],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'rejected', message: 'A human declined this action', timestamp: new Date().toISOString() }) }}",
+        "options": { "responseCode": 200 }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Validate Payload", "type": "main", "index": 0 }]] },
+    "Validate Payload": { "main": [[{ "node": "Slack Approval Request", "type": "main", "index": 0 }]] },
+    "Slack Approval Request": { "main": [[{ "node": "Wait for Approval", "type": "main", "index": 0 }]] },
+    "Wait for Approval": { "main": [[{ "node": "Check Decision", "type": "main", "index": 0 }]] },
+    "Check Decision": {
+      "main": [
+        [{ "node": "Execute Action (customize this)", "type": "main", "index": 0 }],
+        [{ "node": "Respond: Rejected", "type": "main", "index": 0 }]
+      ]
+    },
+    "Execute Action (customize this)": { "main": [[{ "node": "Respond: Completed", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "agent-tools" }, { "name": "hitl" }]
+}

@@ -1,0 +1,94 @@
+{
+  "_meta": {
+    "template": "zero-trust-crm-query",
+    "description": "Zero-trust CRM query webhook tool. Replace the Airtable node with your CRM of choice. Always includes payload validation and Respond to Webhook.",
+    "skill": "n8n-crm-query",
+    "version": "0.1.0"
+  },
+  "name": "[Tool] Zero-Trust CRM Query",
+  "nodes": [
+    {
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "crm-query",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "validate-payload",
+      "name": "Validate Payload",
+      "type": "n8n-nodes-base.code",
+      "position": [480, 300],
+      "parameters": {
+        "jsCode": "// ── Validate incoming payload ──────────────────────────────\n// Customize this to match your tool's accepted parameters.\n\nconst { status, limit } = $json.body;\n\nconst validStatuses = ['Open', 'Qualified', 'Lost'];\nif (!validStatuses.includes(status)) {\n  throw new Error(\n    `Invalid status: \"${status}\". Must be one of: ${validStatuses.join(', ')}`\n  );\n}\n\nconst safeLimit = Math.min(Math.max(1, limit || 20), 100);\n\nreturn { status, limit: safeLimit, validated: true };"
+      }
+    },
+    {
+      "id": "airtable-query",
+      "name": "Airtable Query",
+      "type": "n8n-nodes-base.airtable",
+      "position": [720, 300],
+      "parameters": {
+        "operation": "list",
+        "base": { "__rl": true, "value": "YOUR_BASE_ID", "mode": "id" },
+        "table": { "__rl": true, "value": "YOUR_TABLE_ID", "mode": "id" },
+        "options": {
+          "filterByFormula": "={Status} = '{{ $json.status }}'",
+          "maxRecords": "={{ $json.limit }}",
+          "fields": ["Name", "Email", "Company", "Status", "Created"]
+        }
+      },
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Airtable - YOUR CREDENTIAL NAME"
+        }
+      }
+    },
+    {
+      "id": "format-response",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "position": [960, 300],
+      "parameters": {
+        "jsCode": "// Format the CRM data into a clean response for the agent\nconst records = $input.all().map(item => item.json.fields);\n\nreturn {\n  status: 'success',\n  data: records,\n  count: records.length,\n  message: `Found ${records.length} ${$('Validate Payload').first().json.status} records`\n};"
+      }
+    },
+    {
+      "id": "respond-to-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1200, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[{ "node": "Validate Payload", "type": "main", "index": 0 }]]
+    },
+    "Validate Payload": {
+      "main": [[{ "node": "Airtable Query", "type": "main", "index": 0 }]]
+    },
+    "Airtable Query": {
+      "main": [[{ "node": "Format Response", "type": "main", "index": 0 }]]
+    },
+    "Format Response": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [{ "name": "agent-tools" }]
+}

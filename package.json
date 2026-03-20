@@ -1,0 +1,59 @@
+{
+  "name": "n8n-agent-cli",
+  "version": "0.1.0",
+  "description": "AI agent CLI + MCP server for n8n — zero-trust webhook tool platform, workflow synthesis, and deterministic automation for OpenClaw agents",
+  "keywords": [
+    "n8n",
+    "mcp",
+    "ai-agent",
+    "automation",
+    "webhook",
+    "openclaw",
+    "zero-trust",
+    "workflow"
+  ],
+  "author": "Brandon Charleson",
+  "license": "MIT",
+  "homepage": "https://github.com/bcharleson/n8n-agent-cli",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bcharleson/n8n-agent-cli"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "n8n-agent": "dist/index.js",
+    "n8n-agent-cli": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "start": "node dist/index.js",
+    "mcp": "node dist/mcp.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@inquirer/prompts": "^8.3.0",
+    "commander": "^14.0.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.7.0"
+  },
+  "tsup": {
+    "entry": {
+      "index": "src/index.ts",
+      "mcp": "src/mcp.ts"
+    },
+    "format": ["esm"],
+    "target": "node20",
+    "clean": true,
+    "splitting": false
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,4 +1,143 @@
-# n8n-agent-cli — AGENTS.md
+# n8n-agent-cli
+
+CLI + MCP server for managing n8n workflows and triggering webhook-based tools from AI agents. Core pattern: agent sends a scoped JSON payload to a webhook URL, n8n runs the workflow with its own stored credentials, agent gets structured JSON back. Agent never touches an API key.
+
+## Runtime
+
+Runs on Node 20+. Built with TypeScript + tsup (ESM output).
+
+```bash
+bun run build       # compile src/ -> dist/
+bun run dev         # watch mode
+bun run typecheck   # tsc --noEmit
+```
+
+## Install (published)
+
+```bash
+npm install -g n8n-agent-cli
+# or
+npx n8n-agent-cli --help
+```
+
+## Connect to an n8n instance
+
+```bash
+n8n-agent instance connect \
+  --url https://YOUR-INSTANCE.app.n8n.cloud \
+  --api-key YOUR_N8N_API_KEY
+
+n8n-agent instance health
+```
+
+Config persists to `~/.n8n-agent/config.json`. The MCP server reads this automatically.
+
+## Environment Variables
+
+| Variable | Description |
+|---|---|
+| `N8N_URL` | n8n instance URL (overrides saved config) |
+| `N8N_API_KEY` | n8n API key (overrides saved config) |
+| `N8N_AGENT_JSON` | Set to `1` to force JSON output in non-pipe contexts |
+
+## CLI Reference
+
+### Instance
+
+```bash
+n8n-agent instance connect --url <url> --api-key <key> [--name <alias>]
+n8n-agent instance health
+```
+
+### Workflows
+
+```bash
+n8n-agent workflows list [--active] [--tags <tag>] [--limit <n>]
+n8n-agent workflows get --id <id>
+n8n-agent workflows activate --id <id>
+n8n-agent workflows deactivate --id <id>
+n8n-agent workflows delete --id <id>
+```
+
+### Executions
+
+```bash
+n8n-agent executions list [--workflow-id <id>] [--status success|error|waiting] [--limit <n>]
+n8n-agent executions get --id <id>
+n8n-agent executions delete --id <id>
+```
+
+### Webhooks (zero-trust tool calls)
+
+```bash
+# Production webhook - workflow must be active
+n8n-agent webhooks trigger --url <webhook-url> --payload '{"key": "value"}'
+
+# Test webhook - workflow must be in "Listen for Test Event" mode
+n8n-agent webhooks test --url <test-url> --payload '{"key": "value"}'
+```
+
+### Credentials
+
+```bash
+n8n-agent credentials list       # names/types only - values never exposed
+n8n-agent credentials delete --id <id>
+```
+
+### MCP Server
+
+```bash
+n8n-agent mcp    # stdio transport for Claude Code / Claude Desktop
+```
+
+## MCP Config (Claude Code / Claude Desktop)
+
+```json
+{
+  "mcpServers": {
+    "n8n-agent": {
+      "command": "n8n-agent",
+      "args": ["mcp"],
+      "env": {
+        "N8N_URL": "https://YOUR-INSTANCE.app.n8n.cloud",
+        "N8N_API_KEY": "YOUR_N8N_API_KEY"
+      }
+    }
+  }
+}
+```
+
+If `~/.n8n-agent/config.json` is set, the env vars are optional.
+
+## Workflow Templates
+
+`templates/` contains importable n8n workflow JSON:
+
+- `zero-trust-crm-query.workflow.json` - webhook → validate → CRM → respond
+- `hitl-gate.workflow.json` - human-in-the-loop approval gate pattern
+
+## Skills (Usage Guides)
+
+`skills/` contains SKILL.md files for four n8n patterns:
+
+| Skill | Pattern |
+|---|---|
+| `n8n-crm-query` | Zero-trust CRM reads via webhook |
+| `n8n-ai-router` | Route agent decisions through n8n logic |
+| `n8n-cron-agent` | Scheduled agent triggers |
+| `n8n-hitl-gate` | Human approval gate before destructive actions |
+
+## Critical Gotchas
+
+- Webhook trigger node must have **Response Mode: "Using 'Respond to Webhook' Node"** - otherwise `webhooks trigger` hangs waiting for a response that never comes.
+- Production webhooks require the workflow to be **active**. Test webhooks require the workflow to be in **Listen for Test Event** mode. These are mutually exclusive states.
+- CLI auto-detects pipes and switches to JSON output. Set `N8N_AGENT_JSON=1` to force JSON in scripts that don't pipe.
+- The MCP server exposes n8n tools to agents. Define each webhook tool in the agent's SOUL.md or system prompt - include the URL, payload schema, and a note that credentials are managed in n8n.
+
+---
+
+## Full Skill Guide: OpenClaw + n8n (from AGENTS.md)
+
 
 > **Skill: Using n8n as a Zero-Trust, Deterministic Tool Platform for AI Agents**
 >
@@ -16,7 +155,7 @@ n8n is the opposite: deterministic, auditable, and credential-safe. Every workfl
 
 **The fundamental pattern:**
 
-> Give the agent a webhook URL as its tool — not an API key, not raw access, a proxy.
+> Give the agent a webhook URL as its tool - not an API key, not raw access, a proxy.
 > The agent sends a structured payload. n8n runs the workflow exactly as designed.
 > n8n sends the result back. The agent never touches the underlying API, credential, or database.
 
@@ -38,14 +177,14 @@ n8n Workflow
     ├─ Webhook Trigger        receives payload
     ├─ Code (validation)      sanitize + scope input
     ├─ Logic nodes            Airtable / HubSpot / HTTP / IF / Switch...
-    │    └─ credentials stored in n8n vault — agent never sees these
+    │    └─ credentials stored in n8n vault - agent never sees these
     └─ Respond to Webhook     returns result synchronously
     │
     ▼
-Agent receives structured JSON — { status, data, message }
+Agent receives structured JSON - { status, data, message }
 ```
 
-The round-trip is **synchronous from the agent's perspective**. The agent fires a POST and waits. n8n's `Respond to Webhook` node makes this native — no tunneling, no callbacks.
+The round-trip is **synchronous from the agent's perspective**. The agent fires a POST and waits. n8n's `Respond to Webhook` node makes this native - no tunneling, no callbacks.
 
 ---
 
@@ -55,7 +194,7 @@ The round-trip is **synchronous from the agent's perspective**. The agent fires 
 
 API keys for every external service (Airtable, HubSpot, Salesforce, Stripe, Instantly, Slack, databases, etc.) live in n8n's encrypted credential vault. They are referenced by workflow nodes and never passed through payloads, never visible in workflow UI, never accessible to the agent.
 
-The agent's only credential is the webhook URL. If the agent's context is compromised, the attacker gets a scoped webhook proxy — not the underlying API keys.
+The agent's only credential is the webhook URL. If the agent's context is compromised, the attacker gets a scoped webhook proxy - not the underlying API keys.
 
 **How to store credentials:** `n8n Settings → Credentials → + Add Credential` → select service type → enter key once → reference by name in node dropdowns. The value never appears again.
 
@@ -82,7 +221,7 @@ This is what makes AI agents enterprise-deployable: a non-technical business own
 
 ### What this solves
 
-Agents querying or writing to CRMs (Airtable, HubSpot, Salesforce, Notion, Monday.com, Zoho) need access to company data — but should never have raw API access to the whole system.
+Agents querying or writing to CRMs (Airtable, HubSpot, Salesforce, Notion, Monday.com, Zoho) need access to company data - but should never have raw API access to the whole system.
 
 ### When to use
 
@@ -108,11 +247,11 @@ Settings that matter:
 | Field | Value |
 |-------|-------|
 | HTTP Method | POST |
-| Path | descriptive — `query-leads`, `create-contact`, `get-deal` |
+| Path | descriptive - `query-leads`, `create-contact`, `get-deal` |
 | **Response Mode** | **Using 'Respond to Webhook' Node** ← critical |
 | Authentication | None (or Basic Auth for extra security) |
 
-### Payload Validation (Code node — never skip this)
+### Payload Validation (Code node - never skip this)
 
 ```javascript
 // Always validate before touching any API
@@ -133,7 +272,7 @@ return {
 
 ### Standard Response Schema
 
-Use this shape for every workflow — agents learn to handle it consistently:
+Use this shape for every workflow - agents learn to handle it consistently:
 
 ```json
 {
@@ -148,7 +287,7 @@ Use this shape for every workflow — agents learn to handle it consistently:
 ### OpenClaw Tool Definition (add to SOUL.md)
 
 ```markdown
-### query_leads — n8n Webhook Tool
+### query_leads - n8n Webhook Tool
 URL: https://YOUR-INSTANCE.app.n8n.cloud/webhook/query-leads
 Method: POST
 When to use: User asks about leads, prospects, pipeline status, or contact counts
@@ -188,7 +327,7 @@ Webhook → Validate → Airtable Get → Transform (Code node) → HubSpot Crea
 
 ### What this solves
 
-For operations that are irreversible, expensive, or have significant business impact, a human should confirm before the action executes. The agent initiates — a human approves — n8n executes.
+For operations that are irreversible, expensive, or have significant business impact, a human should confirm before the action executes. The agent initiates - a human approves - n8n executes.
 
 ### When to add a HITL gate
 
@@ -220,7 +359,7 @@ Webhook Trigger
 
 ### Building the Approval System
 
-**Step 1: Create a second workflow — the approval endpoint**
+**Step 1: Create a second workflow - the approval endpoint**
 - Webhook Trigger (GET): path `approve-action`
 - Accepts query params: `execution_id`, `decision` (`approved` | `rejected`)
 - Responds: `{ status: "received" }` (immediately)
@@ -240,7 +379,7 @@ Details:
 <YOUR_N8N_URL/webhook/approve-action?execution_id={{ $execution.id }}&decision=approved|✅ Approve>
 <YOUR_N8N_URL/webhook/approve-action?execution_id={{ $execution.id }}&decision=rejected|❌ Reject>
 
-_Requested by OpenClaw — expires in 24 hours_
+_Requested by OpenClaw - expires in 24 hours_
 ```
 
 **Step 3: Wait node settings**
@@ -259,21 +398,21 @@ NO  → Respond: { status: "rejected", message: "Human declined this action" }
 ### Agent Response Handling (add to SOUL.md)
 
 ```markdown
-### create_deal — n8n Tool (HITL enabled)
+### create_deal - n8n Tool (HITL enabled)
 URL: https://YOUR-INSTANCE/webhook/create-deal
 Method: POST
 Payload: { company: string, value: number, stage: string }
 Returns:
-  - { status: "completed" } — deal created, share deal_id with user
-  - { status: "rejected" }  — human declined, inform user, do not retry automatically
-  - { status: "timeout" }   — approval expired in 24h, tell user to check Slack
-  - { status: "error" }     — something failed, share error message
+  - { status: "completed" } - deal created, share deal_id with user
+  - { status: "rejected" }  - human declined, inform user, do not retry automatically
+  - { status: "timeout" }   - approval expired in 24h, tell user to check Slack
+  - { status: "error" }     - something failed, share error message
 Note: Requires human approval via Slack. Inform the user this may take time.
 ```
 
 ### HITL as Trust Calibration
 
-Start with HITL on every high-stakes workflow. Review execution logs. When you see the agent consistently making correct decisions on a workflow, remove the HITL gate — the history is your evidence. This is how you calibrate trust with AI agents in a business environment.
+Start with HITL on every high-stakes workflow. Review execution logs. When you see the agent consistently making correct decisions on a workflow, remove the HITL gate - the history is your evidence. This is how you calibrate trust with AI agents in a business environment.
 
 ---
 
@@ -284,7 +423,7 @@ Start with HITL on every high-stakes workflow. Review execution logs. When you s
 Most people think: **agent calls n8n**.
 This skill inverts it: **n8n calls agent**.
 
-For scheduled automation, n8n's Cron trigger is the reliable orchestrator. OpenClaw handles one specific step — the judgment, scoring, or classification — and returns a structured result. n8n routes based on that result.
+For scheduled automation, n8n's Cron trigger is the reliable orchestrator. OpenClaw handles one specific step - the judgment, scoring, or classification - and returns a structured result. n8n routes based on that result.
 
 ```
 n8n Cron (9am daily)
@@ -381,7 +520,7 @@ Cron → Instantly: fetch sequence stats → OpenClaw: analyze performance → S
 
 ### Why Cron + HITL Is Powerful
 
-Cron automation runs without anyone watching. HITL inserts a human checkpoint when an automated run encounters something unusual — a deal over a certain size, a contact that matches a VIP criteria, an action that has irreversible consequences.
+Cron automation runs without anyone watching. HITL inserts a human checkpoint when an automated run encounters something unusual - a deal over a certain size, a contact that matches a VIP criteria, an action that has irreversible consequences.
 
 ### Pattern: Conditional HITL in Cron Workflows
 
@@ -442,7 +581,7 @@ Webhook Trigger: POST { task_type, query, context? }
 ### OpenClaw Tool Definition
 
 ```markdown
-### ai_router — n8n Tool
+### ai_router - n8n Tool
 URL: https://YOUR-INSTANCE/webhook/ai-router
 Method: POST
 When to use: When you need capabilities not in your current context:
@@ -452,8 +591,8 @@ When to use: When you need capabilities not in your current context:
   - Specialized domain knowledge (legal, compliance, technical)
 Payload:
   - task_type: "web_search" | "knowledge_base" | "image_analysis" | "data_lookup" | "legal_review"
-  - query: string — what you need to know
-  - context: string — optional additional context for the sub-agent
+  - query: string - what you need to know
+  - context: string - optional additional context for the sub-agent
 Returns: { status, result, model_used, latency_ms }
 Example: { "task_type": "web_search", "query": "latest n8n version changelog" }
 ```
@@ -469,18 +608,18 @@ No other changes needed. This is the power of the router: **new AI capabilities 
 
 ---
 
-## Skill 6: Webhook Tool Configuration — The Complete Guide
+## Skill 6: Webhook Tool Configuration - The Complete Guide
 
 ### How to Build Any Webhook Tool
 
 Follow this exact sequence for any tool you build:
 
-**Step 1 — Create workflow**
+**Step 1 - Create workflow**
 - `+ New Workflow`
 - Name: `[Tool] {Descriptive Name}` (the `[Tool]` prefix helps you find them)
 - Tag: `agent-tools`
 
-**Step 2 — Webhook Trigger**
+**Step 2 - Webhook Trigger**
 ```
 HTTP Method: POST
 Path: your-tool-name-kebab-case
@@ -489,7 +628,7 @@ Response Mode: "Using 'Respond to Webhook' Node"  ← REQUIRED
 Test URL: `https://YOUR-INSTANCE/webhook-test/your-tool-name`
 Production URL: `https://YOUR-INSTANCE/webhook/your-tool-name`
 
-**Step 3 — Code node (validation — always)**
+**Step 3 - Code node (validation - always)**
 ```javascript
 // Validate every field the agent might send
 const body = $json.body;
@@ -511,10 +650,10 @@ const limit = Math.min(Math.max(1, parseInt(body.limit) || 20), 100);
 return { ...body, limit, _validated: true };
 ```
 
-**Step 4 — Logic nodes**
+**Step 4 - Logic nodes**
 Use stored credentials. Use `{{ $json.field_name }}` expressions to pass validated input to node parameters.
 
-**Step 5 — Respond to Webhook**
+**Step 5 - Respond to Webhook**
 ```json
 {
   "status": "success",
@@ -523,7 +662,7 @@ Use stored credentials. Use `{{ $json.field_name }}` expressions to pass validat
 }
 ```
 
-**Step 6 — Test**
+**Step 6 - Test**
 ```bash
 # In n8n: click "Listen for Test Event" on Webhook Trigger node
 n8n-agent webhooks test \
@@ -533,10 +672,10 @@ n8n-agent webhooks test \
 
 Watch nodes light up. Click each node to verify input/output.
 
-**Step 7 — Activate**
+**Step 7 - Activate**
 Toggle workflow to Active. The production URL is now live.
 
-**Step 8 — Add to OpenClaw SOUL.md**
+**Step 8 - Add to OpenClaw SOUL.md**
 Document: URL, when to use, payload schema, response schema, error handling notes.
 
 ### Payload Design Rules
@@ -561,7 +700,7 @@ Design every workflow to return this:
   "message": "Human-readable description",
   "count": 0,
   "timestamp": "ISO 8601",
-  "execution_id": "optional — helps with debugging"
+  "execution_id": "optional - helps with debugging"
 }
 ```
 
@@ -573,13 +712,13 @@ Add these behaviors to OpenClaw's SOUL.md:
 ## n8n Webhook Tool Error Handling
 
 When a webhook tool returns:
-- status "success" — use the data, respond to user normally
-- status "error" — describe the error to the user; if it sounds transient (timeout, rate limit),
+- status "success" - use the data, respond to user normally
+- status "error" - describe the error to the user; if it sounds transient (timeout, rate limit),
   offer to retry once; if it's a validation error, correct the payload
-- status "rejected" — a human declined the action; inform user, do not retry automatically
-- status "timeout" — approval window expired; tell user to check n8n or Slack
-- status "pending_approval" — action is awaiting human approval; inform user it may take time
-- HTTP error (non-200) — the workflow itself failed; suggest user check n8n execution logs
+- status "rejected" - a human declined the action; inform user, do not retry automatically
+- status "timeout" - approval window expired; tell user to check n8n or Slack
+- status "pending_approval" - action is awaiting human approval; inform user it may take time
+- HTTP error (non-200) - the workflow itself failed; suggest user check n8n execution logs
 ```
 
 ---
@@ -623,7 +762,7 @@ For agency work or multi-client OpenClaw deployments, each client has their own 
 n8n-agent instance connect --url CLIENT_URL --api-key CLIENT_KEY --name acme-corp
 ```
 
-The agent's SOUL.md references webhook URLs for that client's instance. Switching to another client is a SOUL.md swap — no CLI reconfiguration.
+The agent's SOUL.md references webhook URLs for that client's instance. Switching to another client is a SOUL.md swap - no CLI reconfiguration.
 
 ---
 
@@ -662,7 +801,7 @@ n8n-agent executions get --id EXECUTION_ID
 
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
-| Error on Code node | Validation failed — agent sent bad payload | Check agent's SOUL.md payload schema |
+| Error on Code node | Validation failed - agent sent bad payload | Check agent's SOUL.md payload schema |
 | Error on CRM node | Credential expired | Refresh in `Settings → Credentials` |
 | Error on HTTP Request | External API down or rate limited | Add retry logic or wait |
 | Stuck on "Waiting" | HITL gate awaiting human | Check Slack for approval notification |
@@ -705,16 +844,16 @@ Returns: credential name, type, creation date. Never returns values.
 ### Supported Credential Types (n8n built-in)
 
 n8n supports 400+ credential types including:
-- `airtableTokenApi` — Airtable Personal Access Token
-- `hubspotAppToken` — HubSpot Private App token
-- `salesforceOAuth2Api` — Salesforce OAuth
-- `slackApi` — Slack Bot Token
-- `openAiApi` — OpenAI API key
-- `anthropicApi` — Anthropic API key
-- `googleSheetsOAuth2Api` — Google Sheets
-- `stripeApi` — Stripe secret key
-- `httpBasicAuth` — Basic auth for any HTTP endpoint
-- `httpHeaderAuth` — Header-based auth (Bearer, API key)
+- `airtableTokenApi` - Airtable Personal Access Token
+- `hubspotAppToken` - HubSpot Private App token
+- `salesforceOAuth2Api` - Salesforce OAuth
+- `slackApi` - Slack Bot Token
+- `openAiApi` - OpenAI API key
+- `anthropicApi` - Anthropic API key
+- `googleSheetsOAuth2Api` - Google Sheets
+- `stripeApi` - Stripe secret key
+- `httpBasicAuth` - Basic auth for any HTTP endpoint
+- `httpHeaderAuth` - Header-based auth (Bearer, API key)
 
 ### Naming Convention
 
@@ -735,14 +874,14 @@ Examples:
 
 ### Cloud (Fastest Start)
 
-1. Sign up at [n8n.io](https://n8n.io) — free tier available
+1. Sign up at [n8n.io](https://n8n.io) - free tier available
 2. Your webhook base URL: `https://YOUR-SUBDOMAIN.app.n8n.cloud`
 3. API key: `Settings → n8n API → Create an API key`
 
 ### Self-Hosted (Production)
 
 ```bash
-# Docker Compose — minimal setup
+# Docker Compose - minimal setup
 cat > docker-compose.yml << 'EOF'
 version: '3.8'
 services:
@@ -783,24 +922,24 @@ When connected via MCP, OpenClaw has access to all of these tools:
 
 | Tool name | What it does | When to use |
 |-----------|-------------|-------------|
-| `webhook_trigger` | **Core tool** — POST payload to n8n, receive result synchronously | Any time the agent needs to call a CRM, send data, or trigger any locked workflow |
+| `webhook_trigger` | **Core tool** - POST payload to n8n, receive result synchronously | Any time the agent needs to call a CRM, send data, or trigger any locked workflow |
 | `webhook_test` | Same but targets test URL | During workflow development/testing |
 | `workflow_list` | List all workflows with status | When agent needs to know what tools are available |
 | `workflow_get` | Get full workflow JSON + config | When debugging or reviewing a workflow |
 | `workflow_activate` | Enable a workflow | When deploying a new tool |
 | `workflow_deactivate` | Disable a workflow | When taking a tool offline |
-| `workflow_delete` | Remove a workflow | Cleanup only — confirm with user |
+| `workflow_delete` | Remove a workflow | Cleanup only - confirm with user |
 | `execution_list` | Recent execution history | When debugging a failed tool call |
 | `execution_get` | Full node-level trace | When diagnosing exactly what went wrong |
 | `execution_delete` | Remove an execution record | Log cleanup |
 | `credential_list` | Inventory of vault contents (names only) | When checking if a credential exists |
-| `credential_delete` | Remove a credential | Cleanup only — confirm with user |
+| `credential_delete` | Remove a credential | Cleanup only - confirm with user |
 | `instance_connect` | Add a new n8n instance | Initial setup or adding client instances |
 | `instance_health` | Check instance reachability | Before any operation, or when debugging connectivity |
 
 ### Most Important: `webhook_trigger`
 
-This is the tool that enables the zero-trust pattern. When a user asks the agent to do something that involves external APIs (read a CRM, send an email, query a database), the agent should call `webhook_trigger` with the appropriate URL and payload — not attempt to access the API directly.
+This is the tool that enables the zero-trust pattern. When a user asks the agent to do something that involves external APIs (read a CRM, send an email, query a database), the agent should call `webhook_trigger` with the appropriate URL and payload - not attempt to access the API directly.
 
 ```
 Tool: webhook_trigger
@@ -844,7 +983,7 @@ Before any n8n webhook tool goes into production:
 - [ ] All API keys in n8n credential vault (never in workflow code, env vars, or payloads)
 - [ ] Webhook URL uses HTTPS
 - [ ] Payload validated in Code node before reaching any API call
-- [ ] Action parameters use enums — no free-form strings for operation type
+- [ ] Action parameters use enums - no free-form strings for operation type
 - [ ] Operation is scoped to minimum necessary (no "query any table" handlers)
 - [ ] HITL gate added for all create/update/delete operations in production systems
 - [ ] HITL timeout configured (max 24h) with graceful timeout response
@@ -869,7 +1008,7 @@ Before any n8n webhook tool goes into production:
 | **Active workflow** | A workflow currently listening for triggers. Must be activated before it responds. |
 | **HITL** | Human-in-the-loop. A human approval step inserted into a workflow before a sensitive action. |
 | **Webhook-as-Tool** | The pattern of using a webhook URL as a scoped, auditable proxy for API access. |
-| **Zero-trust tool** | A tool where the agent has no credentials — only a webhook URL that proxies to secured systems. |
+| **Zero-trust tool** | A tool where the agent has no credentials - only a webhook URL that proxies to secured systems. |
 | **Cron inversion** | Pattern where n8n orchestrates and calls OpenClaw as a sub-step, rather than the reverse. |
 | **AI router** | n8n Switch node that routes agent calls to different AI models based on task type. |
 
